@@ -1,0 +1,3 @@
+Sub DeleteRows()
+Rows("4:1000").Delete
+End Sub

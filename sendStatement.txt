@@ -1,0 +1,457 @@
+Sub SendStatements()
+
+    pastDue = DateValue("January 1, 2018")
+
+    Set Header = Rows(1).Cells
+    
+    'Predeclares all the columns as variables
+    colOpen = Header.Find("Open Amount").Column
+    ColGross = Header.Find("Gross Amount").Column
+    
+    AddOpen = Cells(1, colOpen).Address
+    AddGross = Cells(1, ColGross).Address
+
+    'Prepare data
+    Standardize Header, AddOpen, AddGross   'Standardize template
+    ReorderColumns                          'Reorder columns
+    ReorderRows Header                      'Reorder rows
+    
+    'Declares all the columns as variables for further uses
+    ColType = Header.Find("Doc Type").Column
+    ColRef = Header.Find("Reference").Column
+    ColInv = Header.Find("Document Number").Column
+    colOpen = Header.Find("Open Amount").Column
+    ColGross = Header.Find("Gross Amount").Column
+    colDate = Header.Find("Invoice Date").Column
+    ColDue = Header.Find("Due Date").Column
+    colDPD = Header.Find("Days Past Due").Column
+    colJDE = Header.Find("Customer Number").Column
+    
+    AddType = Cells(1, ColType).Address
+    AddOpen = Cells(1, colOpen).Address
+    AddGross = Cells(1, ColGross).Address
+    AddJDE = Cells(1, colJDE).Address
+    
+    'Loop through rows to setup statements
+    
+    startcell = "A1"
+    endcell = ""
+    
+    unapplied = False
+    deduction = False
+    Reference = False
+    late_inv = 0
+    total_inv = 0
+    total_fin = 0
+    total_open = 0
+    total_over = 0
+    
+    Start = True
+    iter = 1
+    Refresh = False
+    
+    For Each cell In Range(AddJDE).EntireColumn.Cells
+    
+        If Start Then
+            startcell = Cells(cell.Row, ColRef).Address
+            Start = False
+        Else
+            If Refresh Then
+                startcell = Cells(cell.Row + 1, ColRef).Address
+                iter = 2
+                Refresh = False
+                
+                'Reset counters
+                unapplied = False
+                deduction = False
+                Reference = False
+                late_inv = 0
+                total_inv = 0
+                total_fin = 0
+                total_open = 0
+                total_over = 0
+            End If
+        End If
+    
+        If iter > 0 Then
+            iter = iter - 1
+        ElseIf Not IsEmpty(cell.Value) Then
+        
+            'Trigger if document must be included in statement
+            rowType = Cells(cell.Row, ColType).Value
+            If Cells(cell.Row, colOpen).Value = 0 Then
+                cell.EntireRow.Hidden = True
+            ElseIf rowType = "RU" Then
+                unapplied = True
+                cell.EntireRow.Hidden = True
+            ElseIf rowType = "R5" Then
+                deduction = True
+                cell.EntireRow.Hidden = True
+            ElseIf rowType = "RB" Then
+                deduction = True
+                cell.EntireRow.Hidden = True
+            ElseIf Not Cells(cell.Row, colOpen).Value = Cells(cell.Row, ColGross).Value And Not rowType = "RI" Then
+                deduction = True
+                cell.EntireRow.Hidden = True
+            Else
+                If Not rowType = "RF" Then
+                    total_inv = total_inv + 1
+                End If
+                
+                total_open = total_open + Cells(cell.Row, colOpen).Value
+            End If
+            
+            'If date prior Oct 1st, 2017, remove PO
+            If Not IsEmpty(Cells(cell.Row, ColRef).Value) Then
+                Reference = True
+                If Cells(cell.Row, colDate).Value < DateValue("October 1, 2017") Then
+                    Cells(cell.Row, ColRef).Value = ""
+                End If
+            End If
+            
+            'Highlight past due invoices and finance charges
+            If cell.EntireRow.Hidden Then
+            ElseIf rowType = "RF" Then
+                cell.EntireRow.Font.Color = RGB(255, 0, 0)
+                total_fin = total_fin + 1
+            ElseIf Cells(cell.Row, colDate).Value < pastDue Then
+                cell.EntireRow.Font.Color = RGB(255, 0, 0)
+                
+                If rowType = "GC" And Cells(cell.Row, ColDue).Value > pastDue Then
+                    'Tolerate rentals till due date
+                Else
+                    total_over = total_over + 1
+                    late_inv = Cells(cell.Row, ColInv).Value
+                End If
+            End If
+            
+            'Check if row below is for same account, if not, trigger new statement
+            If Not cell.Value = cell.Offset(1).Value Then
+            
+                Refresh = True
+                endcell = Cells(cell.Row + 1, colDPD).Address
+            
+                'Insert 2 new rows for total and new header
+                cell.Offset(1).EntireRow.Insert
+                cell.Offset(2).EntireRow.Insert
+                
+                If deduction Then
+                    total_inv = total_over
+                    
+                    'If a deduction was found, hide current documents and collect only past due
+                    For Each incell In Range(startcell, endcell).Columns(1).Cells
+                        If IsDate(Cells(incell.Row, colDate).Value) Then
+                            If Cells(incell.Row, colDate).Value > pastDue Then
+                                incell.EntireRow.Hidden = True
+                            End If
+                        End If
+                    Next
+                    
+                    cell.Offset(1).EntireRow.Hidden = True
+                End If
+                
+                'Format the total row
+                Cells(cell.Row + 1, colOpen - 1).Value = "Total"
+                Cells(cell.Row + 1, colOpen - 1).Font.Bold = True
+                Cells(cell.Row + 1, colOpen - 1).Interior.Color = RGB(255, 255, 0)
+                Cells(cell.Row + 1, colOpen - 1).Font.Color = RGB(0, 0, 0)
+                
+                Cells(cell.Row + 1, colOpen).Value = total_open
+                Cells(cell.Row + 1, colOpen).Font.Bold = True
+                Cells(cell.Row + 1, colOpen).Interior.Color = RGB(255, 255, 0)
+                Cells(cell.Row + 1, colOpen).Font.Color = RGB(0, 0, 0)
+               
+                'Copy header
+                Header.Copy
+                cell.Offset(2).EntireRow.PasteSpecial
+                
+                'Email's body
+                Dim body As String
+                Dim rng As Range
+                Set rng = Nothing
+                
+                JDE = Cells(cell.Row, colJDE)
+                body = ""
+                body = SetBodyTxt(body, "greetings")
+                    
+                If unapplied Then
+                ElseIf total_inv < 1 Or total_inv > 200 Then
+                ElseIf total_open < 0 Then
+                ElseIf total_over < 1 Then
+                Else
+                    If total_over = 1 And total_inv = 1 Then
+                        body = SetBodyTxt(body, "unique", late_inv)
+                    Else
+                        If total_over = 1 Then
+                            body = SetBodyTxt(body, "unique", late_inv)
+                        ElseIf total_inv = total_over And Not deduction Then
+                            body = SetBodyTxt(body, "all", late_inv)
+                            total_fin = 0
+                        Else
+                            If deduction Then
+                                body = SetBodyTxt(body, "invoices")
+                            Else
+                                body = SetBodyTxt(body, "date")
+                            End If
+                        End If
+                        
+                        If total_fin Then
+                            body = SetBodyTxt(body, "fin")
+                        Else
+                            body = SetBodyTxt(body, "nofin")
+                        End If
+                    
+                        If Not deduction Then
+                            body = SetBodyTxt(body, "statement")
+                        Else
+                            body = SetBodyTxt(body, "nostatement")
+                        End If
+                        
+                        Set rng = Range(startcell, endcell)
+                        rng.Select
+                    End If
+                    
+                    body = SetBodyTxt(body, "salutation")
+        
+                    email = GetEmail(JDE)
+                    If Not email = 0 Then
+
+                        continue = MsgBox(JDE & " Yes or No " & email, vbYesNo, "Continue?")
+                        If continue = vbNo Then
+                          Exit For
+                        End If
+
+                        SendEmail JDE, email, body, rng
+                        'SendEmail JDE, "francis_lacerte@praxair.com", body, rng
+                    End If
+                End If
+            End If
+        End If
+    Next
+
+End Sub
+Function Standardize(Header, AddOpen, AddGross)
+
+    'Standardize heights And widths
+    Columns.HorizontalAlignment = xlCenter
+    Columns.ColumnWidth = 10
+    Rows.RowHeight = 15
+    
+    'At this point, we're ready to prepare the statements.
+    'Let's ensure we have a valid header bar with all the decorum
+    
+    Header.EntireRow.Interior.Color = RGB(0, 176, 80)
+    Header.EntireRow.Font.Color = RGB(255, 255, 255)
+    Header.EntireRow.Font.Bold = True
+    Header.EntireRow.AutoFit
+    
+    'Set Open Amount and Gross Amount as Numbers with 2 decimals
+    Range(AddOpen).EntireColumn.NumberFormat = "#.00"
+    Range(AddGross).EntireColumn.NumberFormat = "#.00"
+    
+    'Hide all uncessary columns from worksheet
+    
+    Dim allowedColumns As Variant
+    allowedColumns = Array("Doc Type", "Doc Typ Desc", "Document Number", "Open Amount", "Gross Amount", "Invoice Date", "Due Date", "Days Past Due", "Reference", "Customer Number")
+    
+    For Each cell In Header
+        If Not IsInArray(cell.Value, allowedColumns) Then
+            cell.EntireColumn.Hidden = True
+        End If
+    Next
+    
+End Function
+Function ReorderColumns()
+
+    'Help making the template user-friendly by ordering columns.
+    
+    Dim sortColOrder As Variant
+    sortColOrder = Array("Doc Type", "Reference", "Doc Typ Desc", "Document Number", "Open Amount", "Gross Amount", "Invoice Date", "Due Date", "Days Past Due", "Customer Number")
+    
+    Dim ndx As Integer
+    Dim Found As Range, counter As Integer
+    
+    counter = 1
+    
+    For ndx = LBound(sortColOrder) To UBound(sortColOrder)
+    
+        Set Found = Rows("1:1").Find(sortColOrder(ndx), LookIn:=xlValues, lookat:=xlWhole, _
+                          SearchOrder:=xlByColumns, SearchDirection:=xlNext, MatchCase:=False)
+        
+        If Not Found Is Nothing Then
+            If Found.Column <> counter Then
+                Found.EntireColumn.Cut
+                Columns(counter).Insert Shift:=xlToRight
+                Application.CutCopyMode = False
+            End If
+            counter = counter + 1
+        End If
+    Next ndx
+    
+End Function
+Function ReorderRows(Header)
+
+    'Order row by Invoice date THEN JDE. The order is tremendously important.
+    'To-do: move fin charges below table.
+    
+    Dim sortColTypes As Variant
+    sortColTypes = Array("Document Number", "Customer Number")
+    
+    For Each cType In sortColTypes
+        Column = Header.Find(cType).Column
+        CellsAdd = Cells(1, Column).Address
+
+        Cells.Sort _
+            key1:=Range(CellsAdd), order1:=xlAscending, Header:=xlYes
+    Next
+End Function
+Function SetBodyTxt(body, desc, Optional inv)
+
+    lang = "fr"
+    txt_fr = ""
+    txt_en = ""
+    
+    Select Case desc
+        Case Is = "greetings"
+            txt_fr = "Bonjour," & vbNewLine & vbNewLine
+            txt_en = "Hi," & vbNewLine & vbNewLine
+        Case Is = "all"
+            txt_fr = "S.v.p., indiquez-nous la date à laquelle nous pouvons prévoir le paiement de votre compte"
+            txt_en = "Kindly advise when is scheduled your payment of your account"
+        Case Is = "unique"
+            txt_fr = "S.v.p., indiquez-nous la date à laquelle nous pouvons prévoir le paiement de la facture " & inv
+            txt_en = "Kindly advise when is scheduled your payment for invoice " & inv
+        Case Is = "invoices"
+            txt_fr = "S.v.p., indiquez-nous la date à laquelle nous pouvons prévoir le paiement de ces factures:"
+            txt_en = "Kindly advise when we can expect your payment for these invoices"
+        Case Is = "date"
+            txt_fr = "S.v.p., indiquez-nous la date à laquelle nous pouvons prévoir le paiement des factures qui précèdent 2018"
+            txt_en = "Kindly advise when we can expect your payment for all invoices dated prior November 1st"
+        Case Is = "fin"
+            txt_fr = ", ainsi que des frais de finance."
+            txt_en = ", with the finance charges."
+        Case Is = "nofin"
+            txt_fr = "."
+            txt_en = "."
+        Case Is = "statement"
+            txt_fr = vbNewLine & vbNewLine & "Voici votre état de compte:" & vbNewLine & "****"
+            txt_en = vbNewLine & vbNewLine & "Your account statement:" & vbNewLine & "****"
+        Case Is = "nostatement"
+            txt_fr = vbNewLine & vbNewLine & "****"
+            txt_en = vbNewLine & vbNewLine & "****"
+        Case Is = "salutation"
+            txt_fr = vbNewLine & vbNewLine & "Merci à l'avance,"
+            txt_en = vbNewLine & vbNewLine & "Thank you,"
+    End Select
+    
+    If lang = "fr" Then
+        body = body & txt_fr
+    Else
+        body = body & txt_en
+    End If
+    
+    SetBodyTxt = body
+    
+End Function
+Function IsInArray(stringToBeFound As String, arr As Variant) As Boolean
+    IsInArray = (UBound(Filter(arr, stringToBeFound)) > -1)
+End Function
+Function SendEmail(JDE, email, StrBody, rng)
+
+    Signature = vbNewLine & vbNewLine & "Francis Lacerte" & vbNewLine & "Credit/Collection Dept." & vbNewLine & "Tel. 514-856-7301" & vbNewLine & "Fax 514 - 856 - 7329" & vbNewLine & "Francis_Lacerte@Praxair.com" & vbNewLine & "3200 Boul. Pitfield, Saint-Laurent, Qc, Canada, H4S 1K6"
+
+    Dim NSession As Object
+    Dim NDatabase As Object
+    Dim NUIWorkSpace As Object
+    Dim NDoc As Object
+    Dim NUIdoc As Object
+    Dim MailDbName As String
+    
+    Set NSession = CreateObject("Notes.NotesSession")
+    Set NUIWorkSpace = CreateObject("Notes.NotesUIWorkspace")
+    MailDbName = Left$(UserName, 1) & Right$(UserName, (Len(UserName) - InStr(1, UserName, " "))) & ".nsf"
+    Set NDatabase = NSession.GetDatabase("", MailDbName)
+    
+    If Not NDatabase.IsOpen Then
+        NDatabase.OPENMAIL
+    End If
+    
+    'Create a new document
+        
+    Set NDoc = NDatabase.CreateDocument
+    With NDoc
+        .sendto = email
+        .Subject = "Praxair " & JDE
+        .body = StrBody & Signature
+        
+        .SaveMessageOnSend = True
+        .PostedDate = Now()
+        
+        .Save True, False
+        
+        If rng Is Nothing Then
+            .Send 0
+        End If
+    End With
+    
+    'Edit the just-created document to copy and paste the Excel cells into it
+    
+    If Not rng Is Nothing Then
+        Set NUIdoc = NUIWorkSpace.EDITDocument(True, NDoc)
+        With NUIdoc
+    
+            'Find the marker text in the Body item
+            .GotoField ("Body")
+            .FINDSTRING "****"
+    
+            rng.Copy 'CHANGE THIS
+    
+            'Create a temporary Word Document
+            Set WordApp = CreateObject("Word.Application")
+            WordApp.Visible = False                                 'True to aid debugging
+            WordApp.Documents.Add
+    
+            'Paste into Word document and copy to clipboard
+            With WordApp.Selection
+                .PasteSpecial DataType:=10      'Enum WdPasteDataType: 10 = HTML; 2 = Text; 1 = RTF
+                .WholeStory
+                .Copy
+            End With
+    
+            'Paste from clipboard (Word) to Lotus Notes document
+            .Paste
+            Application.CutCopyMode = False
+    
+            WordApp.Quit savechanges:=False
+            Set WordApp = Nothing
+            
+            '.Send
+            .Save True, False
+            .Close False
+        End With
+        
+        With Application
+            .ScreenUpdating = True
+            .DisplayAlerts = True
+        End With
+    End If
+        
+    Set NSession = Nothing
+End Function
+Function GetEmail(JDE)
+
+    GetEmail = 0
+
+    For Each cell In Worksheets("EMAIL").Range("A1:A5000")
+    
+        If IsEmpty(cell.Value) Then
+            Exit For
+        ElseIf cell.Value = JDE Then
+            GetEmail = cell.Offset(0, 1).Value
+            Exit For
+        End If
+    Next
+End Function
+
+
+

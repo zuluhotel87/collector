@@ -1,0 +1,109 @@
+Sub SendDisputes()
+
+    Set Worksheet = Worksheets("Litiges")
+    Set Header = Worksheet.Rows(1).Cells
+
+    'Ensure we're working with a valid worksheet
+    If validWorksheet(Worksheet, Header) Then
+    
+        'Select the columns stance
+        COL_JDE = Header.Find("JDE").Column - 1
+        COL_CU = Header.Find("CU").Column - 1
+        COL_CUST = Header.Find("CUST").Column - 1
+        COL_DATEREQ = Header.Find("DATE").Column - 1
+        COL_HOLD = Header.Find("HOLD").Column - 1
+        COL_ETO = Header.Find("EMAILTO").Column - 1
+        COL_CC = Header.Find("EMAILCC").Column - 1
+        COL_NOCREDIT = Header.Find("NOCREDIT").Column - 1
+        COL_DESC = Header.Find("DETAILS").Column - 1
+    
+        For Each cell In Worksheet.Range("A2:A5000")
+        
+            JDE = cell.Offset(COL_JDE)
+            If IsEmpty(JDE) Then
+                'If no JDE, no result found.
+                Exit For
+            End If
+            
+            'Get row's data
+            CU = cell.Offset(0, COL_CU)
+            CUST = cell.Offset(0, COL_CUST)
+            DATEREQ = cell.Offset(0, COL_DATEREQ)
+            HOLD = cell.Offset(0, COL_HOLD)
+            ETO = cell.Offset(0, COL_ETO)
+            CC = cell.Offset(0, COL_CC)
+            NOCREDIT = cell.Offset(0, COL_NOCREDIT)
+            desc = cell.Offset(0, COL_DESC)
+            
+            'Make sure there is no HOLD with the email and desc fields filled.
+            If IsEmpty(HOLD) = True And IsEmpty(ETO) = False And IsEmpty(desc) = False Then
+                            
+                Subject = JDE & " " & CU & " " & CUST & " // Dispute"
+                If Not IsEmpty(DATEREQ) Then
+                    Subject = Subject & " depuis " & DATEREQ
+                End If
+                
+                body = "Bonjour, " & vbNewLine & vbNewLine & desc
+                If IsEmpty(NOCREDIT) Then
+                    body = body & vbNewLine & vbNewLine & "S.v.p., m'indiquer si des crédits sont à prévoir ou non. Si oui, m'inclure en CC dans la demande à QC-Support."
+                End If
+                
+                SendEmail ETO, CC, Subject, body
+            End If
+        Next
+    End If
+End Sub
+Function SendEmail(ETO, CC, Subject, body)
+
+    Signature = vbNewLine & vbNewLine & "Merci à l'avance," & vbNewLine & vbNewLine & "Francis Lacerte" & vbNewLine & "Credit/Collection Dept." & vbNewLine & "Tel. 514-856-7301" & vbNewLine & "Fax 514 - 856 - 7329" & vbNewLine & "Francis_Lacerte@Praxair.com" & vbNewLine & "3200 Boul. Pitfield, Saint-Laurent, Qc, Canada, H4S 1K6"
+
+    Dim NSession As Object
+    Dim NDatabase As Object
+    Dim NUIWorkSpace As Object
+    Dim NDoc As Object
+    Dim NUIdoc As Object
+    Dim MailDbName As String
+    
+    Set NSession = CreateObject("Notes.NotesSession")
+    Set NUIWorkSpace = CreateObject("Notes.NotesUIWorkspace")
+    MailDbName = Left$(UserName, 1) & Right$(UserName, (Len(UserName) - InStr(1, UserName, " "))) & ".nsf"
+    Set NDatabase = NSession.GetDatabase("", MailDbName)
+    
+    If Not NDatabase.IsOpen Then
+        NDatabase.OPENMAIL
+    End If
+        
+    Set NDoc = NDatabase.CreateDocument
+    With NDoc
+        .sendto = ETO
+        .CopyTo = CC
+        .Subject = Subject
+        .body = body & Signature
+        .SaveMessageOnSend = True
+        .PostedDate = Now()
+        .Save True, True
+        .Send 0
+    End With
+ 
+    Set NSession = Nothing
+End Function
+Function validWorksheet(Worksheet, Header)
+
+    validWorksheet = True
+        
+    Dim allowedColumns As Variant
+    allowedColumns = Array("JDE", "CU", "CUST", "DATE", "HOLD", "EMAILTO", "EMAILCC", "NOCREDIT", "DETAILS")
+    
+    For Each Col In allowedColumns
+
+        Dim rngFound As Range
+        Set rngFound = Header.Find(Col)
+        
+        'Ensure we have valid columns in first row.
+        If rngFound Is Nothing Then
+            MsgBox "Error - Please ensure you have a column named " & Col
+            validWorksheet = False
+            Exit For
+        End If
+    Next
+End Function

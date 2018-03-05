@@ -1,0 +1,29 @@
+Sub HighlightFrom()
+
+    Dim fromSheet As Range
+    Set fromSheet = Application.InputBox("Select the column you wish to highlight data from", "Obtain Range Object", Type:=8)
+    
+    Dim toSheet As Range
+    Set toSheet = Application.InputBox("Select the column you wish to highlight data to", "Obtain Range Object", Type:=8)
+    
+    For Each cell In fromSheet
+    
+        main_value = cell.Value
+        
+        If Not IsEmpty(main_value) Then
+            main_color = cell.Interior.Color
+            For Each ce In toSheet
+                cell_value = ce.Value
+                If Not IsEmpty(cell_value) Then
+                    If main_value = cell_value Then
+                        ce.Interior.Color = main_color
+                    End If
+                Else
+                    Exit For
+                End If
+            Next
+        Else
+            Exit For
+        End If
+    Next
+End Sub
